@@ -356,7 +356,7 @@ class BayeuxClient(object):
 
             # disconnect() runs in the main greenlet, so we want to give the
             # others a chance to finish
-            gevent.joinall(self.greenlets)
+            gevent.joinall([greenlet for greenlet in self.greenlets if greenlet])
             self.disconnect()
 
     def __enter__(self):
