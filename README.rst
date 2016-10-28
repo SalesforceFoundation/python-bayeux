@@ -17,14 +17,12 @@ View test coverage results at ``./coverage``.
 Credits
 -------
 
-- `Distribute`_
 - `modern-package-template`_
 - `requests`_
 - `gevent`_
 - `py.test`_
 - `pytest-cov`_
 
-.. _Distribute: http://pypi.python.org/pypi/distribute
 .. _`modern-package-template`: http://pypi.python.org/pypi/modern-package-template
 .. _`requests`: https://pypi.python.org/pypi/requests
 .. _`gevent`: http://www.gevent.org/
