@@ -252,9 +252,10 @@ class BayeuxClient(object):
 
         if channel not in self.subscription_callbacks:
             self.subscription_callbacks[channel] = []
+            self.subscription_queue.put(subscription_queue_message)
+
         self.subscription_callbacks[channel].append(callback)
 
-        self.subscription_queue.put(subscription_queue_message)
 
     def _subscribe_greenlet(self):
         channel = None
