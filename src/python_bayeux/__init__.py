@@ -190,8 +190,7 @@ class BayeuxClient(object):
 
                     if channel == '/meta/connect':
                         if not element['successful'] and \
-                           element['error'] == '402::Unknown client':
-
+                           element['error'] in ['402::Unknown client', '403::Unknown client']:
                             # TODO: support handshake advice interval
                             if element['advice']['reconnect'] == 'handshake':
                                 self.handshake()
