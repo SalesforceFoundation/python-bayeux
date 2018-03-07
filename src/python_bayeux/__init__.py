@@ -284,7 +284,7 @@ class BayeuxClient(object):
 
             for element in subscribe_responses:
                 if not element['successful'] and \
-                   element['error'] == '402::Unknown client':
+                    element['error'] in ['402::Unknown client', '403::Unknown client']:
                     # Just try again, and eventually connect() will re-try a
                     # handshake
                     self.subscription_queue.put(subscription_queue_message)
