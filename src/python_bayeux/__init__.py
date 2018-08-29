@@ -37,6 +37,7 @@ import gevent.queue
 import requests
 import requests.exceptions
 from datetime import datetime
+from copy import deepcopy
 
 import logging
 LOG = logging.getLogger('python_bayeux')
@@ -195,7 +196,8 @@ class BayeuxClient(object):
                             # TODO: support handshake advice interval
                             if element['advice']['reconnect'] == 'handshake':
                                 self.handshake()
-                                return []
+                                self._resubscribe()
+                                continue
                     else:
                         # We got a push!
                         messages.append(element)
@@ -256,6 +258,12 @@ class BayeuxClient(object):
 
         self.subscription_callbacks[channel].append(callback)
 
+    def _resubscribe(self):
+        current_subscriptions = deepcopy(self.subscription_callbacks)
+        self.subscription_callbacks.clear()
+        for channel, callbacks in current_subscriptions.items():
+            for callback in callbacks:
+                self.subscribe(channel, callback)
 
     def _subscribe_greenlet(self):
         channel = None
