@@ -69,6 +69,7 @@ class BayeuxClient(object):
 
         self.executing = False
         self.stop_greenlets = False
+        self.waiting_for_resubscribe = False
 
         self.outbound_greenlets = [
             gevent.Greenlet(self._subscribe_greenlet),
@@ -186,6 +187,7 @@ class BayeuxClient(object):
                 )
             else:
                 messages = []
+                handshake_required = False
                 for element in connect_response:
                     channel = element['channel']
 
@@ -195,15 +197,17 @@ class BayeuxClient(object):
 
                             # TODO: support handshake advice interval
                             if element['advice']['reconnect'] == 'handshake':
-                                self.handshake()
-                                self._resubscribe()
-                                continue
+                                handshake_required = True
                     else:
                         # We got a push!
                         messages.append(element)
 
                 if len(messages) > 0:
                     self.message_queue.put(messages)
+
+                if handshake_required:
+                    self.handshake()
+                    self._resubscribe()
 
     def _execute_greenlet(self):
         self.executing = True
@@ -238,6 +242,10 @@ class BayeuxClient(object):
                 message_queue_messages,
                 datetime.now()
             ))
+
+            while self.waiting_for_resubscribe:
+                gevent.sleep(0.5)
+
             for message_queue_message in message_queue_messages:
                 channel = message_queue_message['channel']
                 for callback in self.subscription_callbacks[channel]:
@@ -259,11 +267,15 @@ class BayeuxClient(object):
         self.subscription_callbacks[channel].append(callback)
 
     def _resubscribe(self):
+        self.waiting_for_resubscribe = True
+
         current_subscriptions = deepcopy(self.subscription_callbacks)
         self.subscription_callbacks.clear()
         for channel, callbacks in current_subscriptions.items():
             for callback in callbacks:
                 self.subscribe(channel, callback)
+
+        self.waiting_for_resubscribe = False
 
     def _subscribe_greenlet(self):
         channel = None
