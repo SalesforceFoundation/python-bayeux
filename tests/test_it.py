@@ -30,12 +30,16 @@
 
 from getpass import getpass
 from pytest import fixture
+from pytest import raises
 from python_bayeux import BayeuxClient
+from python_bayeux import RepeatedTimeoutException
+from types import MethodType
 
 import gevent
 import simplejson as json
 import random
 from string import ascii_letters
+import requests
 
 
 class ClientOne(BayeuxClient):
@@ -148,6 +152,184 @@ def test_one_client(please_start_demo):
         assert client.value['data']['chat'] == code
 
 
+def test_one_client_subscribe_timeouts(please_start_demo, monkeypatch):
+    # Using getpass() only because I know it handles the py.test tty redirect
+    # well
+    getpass(
+        'Point a browser to \n'
+        'http://localhost:8080/jquery-examples/chat/\n'
+        'Enter a chat name, and click the Join button.\n'
+        'Hit enter when you are ready:'
+    )
+
+    def patched_send_message(self, payload, **kwargs):
+        if 'channel' in payload and payload['channel'] == '/meta/subscribe':
+            raise requests.exceptions.ReadTimeout()
+        else:
+            return self._real_send_message(payload, **kwargs)
+
+    with ClientOne('http://localhost:8080/cometd') as client:
+        client._real_send_message = client._send_message
+        client._send_message = MethodType(patched_send_message, client)
+
+        client.subscribe('/chat/demo', 'test_shutdown')
+        client.publish(
+            'No need to enter a test code.  Just wait...',
+            'TestUser'
+        )
+        try:
+            client.block()
+        except KeyboardInterrupt:
+            assert False
+
+        # This depends on the order that outbound_greenlets is populated
+        assert isinstance(
+            client.outbound_greenlets[0].exception,
+            RepeatedTimeoutException
+        )
+        assert not hasattr(client, 'value')
+
+
+def test_one_client_unsubscribe_timeouts(please_start_demo, monkeypatch):
+    # Using getpass() only because I know it handles the py.test tty redirect
+    # well
+    getpass(
+        'Point a browser to \n'
+        'http://localhost:8080/jquery-examples/chat/\n'
+        'Enter a chat name, and click the Join button.\n'
+        'Hit enter when you are ready:'
+    )
+
+    def patched_send_message(self, payload, **kwargs):
+        if 'channel' in payload and payload['channel'] == '/meta/unsubscribe':
+            raise requests.exceptions.ReadTimeout()
+        else:
+            return self._real_send_message(payload, **kwargs)
+
+    with ClientOne('http://localhost:8080/cometd') as client:
+        client._real_send_message = client._send_message
+        client._send_message = MethodType(patched_send_message, client)
+
+        client.subscribe('/chat/demo', 'test_shutdown')
+        client.publish(
+            'No need to enter a test code.  Just wait...',
+            'TestUser'
+        )
+        client.unsubscribe('/chat/demo')
+        try:
+            client.block()
+        except KeyboardInterrupt:
+            assert False
+
+        # This depends on the order that outbound_greenlets is populated
+        assert isinstance(
+            client.outbound_greenlets[1].exception,
+            RepeatedTimeoutException
+        )
+        assert not hasattr(client, 'value')
+
+
+def test_one_client_subscribe_timeouts_recover(please_start_demo, monkeypatch):
+    # Using getpass() only because I know it handles the py.test tty redirect
+    # well
+    code = ''.join(random.choice(ascii_letters) for i in range(12))
+    getpass(
+        'Point a browser to \n'
+        'http://localhost:8080/jquery-examples/chat/\n'
+        'Enter a chat name, and click the Join button.\n'
+        'Watch for the chat prompt.  When prompted, '
+        'copy the following string into then chat'
+        ' : {0}\n'
+        'Hit enter when you are ready:'.format(
+            code
+        )
+    )
+
+    def patched_send_message(self, payload, **kwargs):
+        if 'channel' in payload and payload['channel'] == '/meta/subscribe':
+            self.test_num_timeouts = 0  \
+                if not hasattr(self, 'test_num_timeouts') \
+                else self.test_num_timeouts + 1
+
+            if self.test_num_timeouts > 5:
+                return self._real_send_message(payload, **kwargs)
+
+            raise requests.exceptions.ReadTimeout()
+        else:
+            return self._real_send_message(payload, **kwargs)
+
+    with ClientOne('http://localhost:8080/cometd') as client:
+        client._real_send_message = client._send_message
+        client._send_message = MethodType(patched_send_message, client)
+
+        client.subscribe('/chat/demo', 'test_shutdown')
+        client.publish(
+            'In about 30 seconds, please enter the test code!',
+            'TestUser'
+        )
+        try:
+            client.block()
+        except KeyboardInterrupt:
+            assert False
+        assert client.value['data']['chat'] == code
+
+
+def test_one_client_unsubscribe_timeouts_recover(please_start_demo,
+                                                 monkeypatch):
+    # Using getpass() only because I know it handles the py.test tty redirect
+    # well
+    code = ''.join(random.choice(ascii_letters) for i in range(12))
+    getpass(
+        'Point a browser to \n'
+        'http://localhost:8080/jquery-examples/chat/\n'
+        'Enter a chat name, and click the Join button.\n'
+        'Watch for the chat prompt.  When prompted, '
+        'copy the following string into then chat'
+        ' : {0}\n'
+        'Hit enter when you are ready:'.format(
+            code
+        )
+    )
+
+    def patched_send_message(self, payload, **kwargs):
+        if 'channel' in payload and payload['channel'] == '/meta/unsubscribe':
+            self.test_num_timeouts = 0  \
+                if not hasattr(self, 'test_num_timeouts') \
+                else self.test_num_timeouts + 1
+
+            if self.test_num_timeouts > 5:
+                return self._real_send_message(payload, **kwargs)
+
+            raise requests.exceptions.ReadTimeout()
+        else:
+            return self._real_send_message(payload, **kwargs)
+
+    with ClientOne('http://localhost:8080/cometd') as client:
+        client._real_send_message = client._send_message
+        client._send_message = MethodType(patched_send_message, client)
+
+        client.subscribe('/chat/demo', 'test_shutdown')
+        client.publish(
+            'Please wait...',
+            'TestUser'
+        )
+        client.unsubscribe('/chat/demo')
+        client.publish(
+            'Please keep waiting...',
+            'TestUser'
+        )
+        client.subscribe('/chat/demo', 'test_shutdown')
+        client.publish(
+            'Please enter the test code!',
+            'TestUser'
+        )
+        try:
+            client.block()
+        except KeyboardInterrupt:
+            assert False
+        assert client.value['data']['chat'] == code
+
+
 def test_two_clients(please_start_demo):
     with ClientTwo('http://localhost:8080/cometd') as client1:
         client1.go()
@@ -167,3 +349,107 @@ def test_two_clients(please_start_demo):
                 assert False
             for element in client2.detected_randoms:
                 assert element in client1.generated_randoms
+
+
+class BrokenClient(BayeuxClient):
+    def test_exception(self, connect_response_element):
+        raise Exception('ouch')
+
+    def publish(self, message, username):
+        super(BrokenClient, self).publish(
+            '/chat/demo',
+            {
+                'chat': message,
+                'user': username
+            }
+        )
+
+
+def test_broken_client(please_start_demo):
+    # Using getpass() only because I know it handles the py.test tty redirect
+    # well
+    getpass(
+        'Point a browser to \n'
+        'http://localhost:8080/jquery-examples/chat/\n'
+        'Enter a chat name, and click the Join button.\n'
+        'Hit enter when you are ready:'
+    )
+
+    with BrokenClient('http://localhost:8080/cometd') as client:
+        client.subscribe('/chat/demo', 'test_exception')
+
+        client.publish(
+            'Please enter any chat message.',
+            'TestUser'
+        )
+
+        client.go()
+        try:
+            client.block()
+        except KeyboardInterrupt:
+            assert False
+
+        # This depends on the order that client.greenlets is populated
+        assert isinstance(
+            client.greenlets[-1].exception,
+            Exception
+        )
+
+        assert str(client.greenlets[-1].exception) == 'ouch'
+
+
+def test_broken_client_same_greenlet(please_start_demo):
+    # Using getpass() only because I know it handles the py.test tty redirect
+    # well
+    getpass(
+        'Point a browser to \n'
+        'http://localhost:8080/jquery-examples/chat/\n'
+        'Enter a chat name, and click the Join button.\n'
+        'Hit enter when you are ready:'
+    )
+
+    with BrokenClient('http://localhost:8080/cometd') as client:
+        client.subscribe('/chat/demo', 'test_exception')
+
+        client.publish(
+            'Please enter any chat message.',
+            'TestUser'
+        )
+
+        with raises(Exception) as e:
+            client.block()
+            assert str(e) == 'ouch'
+
+
+def test_broken_client_local_loop(please_start_demo):
+    # Using getpass() only because I know it handles the py.test tty redirect
+    # well
+    getpass(
+        'Point a browser to \n'
+        'http://localhost:8080/jquery-examples/chat/\n'
+        'Enter a chat name, and click the Join button.\n'
+        'Hit enter when you are ready:'
+    )
+
+    with BrokenClient('http://localhost:8080/cometd') as client:
+        client.subscribe('/chat/demo', 'test_exception')
+
+        client.publish(
+            'Please enter any chat message.',
+            'TestUser'
+        )
+
+        client.go()
+        try:
+            while not client.disconnect_complete:
+                gevent.sleep(0.5)
+        except KeyboardInterrupt:
+            assert False
+
+        # This depends on the order that client.greenlets is populated
+        assert isinstance(
+            client.greenlets[-1].exception,
+            Exception
+        )
+
+        assert str(client.greenlets[-1].exception) == 'ouch'

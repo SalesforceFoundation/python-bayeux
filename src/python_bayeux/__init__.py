@@ -67,19 +67,23 @@ class BayeuxClient(object):
         # handshake() has a side effect of initializing self.message_counter
         self.handshake()
 
+        self.disconnect_complete = False
         self.executing = False
         self.stop_greenlets = False
         self.waiting_for_resubscribe = False
 
-        self.outbound_greenlets = [
-            gevent.Greenlet(self._subscribe_greenlet),
-            gevent.Greenlet(self._unsubscribe_greenlet),
-            gevent.Greenlet(self._publish_greenlet)
-        ]
+        self.outbound_greenlets = []
+        for method in (self._subscribe_greenlet,
+                       self._unsubscribe_greenlet,
+                       self._publish_greenlet):
+            new_greenlet = gevent.Greenlet(method)
+            new_greenlet.link_exception(self._exception_callback)
+            self.outbound_greenlets.append(new_greenlet)
 
-        self.inbound_greenlets = [
-            gevent.Greenlet(self._connect_greenlet)
-        ]
+        self.inbound_greenlets = []
+        connect_greenlet = gevent.Greenlet(self._connect_greenlet)
+        connect_greenlet.link_exception(self._exception_callback)
+        self.inbound_greenlets.append(connect_greenlet)
 
         self.greenlets = self.outbound_greenlets + self.inbound_greenlets
 
@@ -116,13 +120,15 @@ class BayeuxClient(object):
         # TODO: if not successful, then what?
 
     def disconnect(self):
-        return self._send_message({
+        disconnect_response = self._send_message({
             # MUST
             'channel': '/meta/disconnect',
             'clientId': None,
             # MAY
             'id': None
         })
+        self.disconnect_complete = True
+        return disconnect_response
 
     def connect(self, initial=False):
         connect_request_payload = {
@@ -135,13 +141,11 @@ class BayeuxClient(object):
         }
 
         timeout = None if initial else self.connect_timeout
+
         connect_response = self._send_message(
             connect_request_payload,
             timeout=timeout
         )
-
-        if not isinstance(connect_response, list):
-            raise UnexpectedConnectResponseException(str(connect_response))
 
         return connect_response
 
@@ -172,10 +176,14 @@ class BayeuxClient(object):
             )
         )
 
+        if len(response.text) == 0:
+            return ''
+
         return response.json()
 
     def _connect_greenlet(self):
         connect_response = None
+
         while not self.stop_greenlets:
             try:
                 connect_response = self.connect()
@@ -186,6 +194,11 @@ class BayeuxClient(object):
                     )
                 )
             else:
+                if not isinstance(connect_response, list):
+                    raise UnexpectedConnectResponseException(
+                        str(connect_response)
+                    )
+
                 messages = []
                 handshake_required = False
                 for element in connect_response:
@@ -277,9 +290,11 @@ class BayeuxClient(object):
 
         self.waiting_for_resubscribe = False
 
-    def _subscribe_greenlet(self):
+    def _subscribe_greenlet(self, successive_timeout_threshold=20,
+                            timeout_wait=5):
         channel = None
 
+        successive_timeouts = 0
         while True:
             try:
                 subscription_queue_message = self.subscription_queue.get(
@@ -301,7 +316,21 @@ class BayeuxClient(object):
                 'id': None
             }
 
-            subscribe_responses = self._send_message(subscribe_request_payload)
+            subscribe_responses = []
+            try:
+                subscribe_responses = self._send_message(
+                    subscribe_request_payload
+                )
+            except requests.exceptions.ReadTimeout:
+                successive_timeouts += 1
+
+                if successive_timeouts > successive_timeout_threshold:
+                    raise RepeatedTimeoutException('subscribe')
+
+                gevent.sleep(timeout_wait)
+                self.subscription_queue.put(subscription_queue_message)
+            else:
+                successive_timeouts = 0
 
             for element in subscribe_responses:
                 if not element['successful'] and \
@@ -316,7 +345,9 @@ class BayeuxClient(object):
         ))
         self.unsubscription_queue.put(subscription)
 
-    def _unsubscribe_greenlet(self):
+    def _unsubscribe_greenlet(self, successive_timeout_threshold=20,
+                              timeout_wait=5):
+        successive_timeouts = 0
         while True:
             unsubscription = None
             try:
@@ -336,7 +367,18 @@ class BayeuxClient(object):
                 'id': None
             }
 
-            self._send_message(unsubscribe_request_payload)
+            try:
+                self._send_message(unsubscribe_request_payload)
+            except requests.exceptions.ReadTimeout:
+                successive_timeouts += 1
+
+                if successive_timeouts > successive_timeout_threshold:
+                    raise RepeatedTimeoutException('unsubscribe')
+
+                gevent.sleep(timeout_wait)
+                self.unsubscription_queue.put(unsubscription)
+            else:
+                successive_timeouts = 0
 
     def publish(self, channel, payload):
         self.publication_queue.put({
@@ -367,8 +409,9 @@ class BayeuxClient(object):
                 'id': None
             }
 
-            # TODO: at least check for failures
+            # Directly raise exceptions
             publish_response = self._send_message(publish_request_payload)
+
             LOG.info('publish response: {0}'.format(str(publish_response)))
 
     def start(self):
@@ -381,8 +424,12 @@ class BayeuxClient(object):
     # block the main greenlet
     def go(self):
         block_greenlet = gevent.Greenlet(self.block)
+        block_greenlet.link_exception(self._exception_callback)
         self.greenlets.append(block_greenlet)
         block_greenlet.start()
+        # give the execute greenlet a chance to start, so self.executing is
+        # True if we call block() later
+        gevent.sleep(0.1)
 
     # This is how the main greenlet can be made to block
     def block(self):
@@ -392,10 +439,9 @@ class BayeuxClient(object):
             # If we have already given this client its own execute greenlet
             # via go(), then this should do nothing but block
             while True:
-                if self.stop_greenlets:
+                if all([not greenlet for greenlet in self.greenlets]):
                     break
-                else:
-                    gevent.sleep(1)
+                gevent.sleep(1)
 
     def shutdown(self):
         if not self.shutdown_called:
@@ -412,11 +458,30 @@ class BayeuxClient(object):
             )
             self.disconnect()
 
+    def _exception_callback(self, failed_greenlet):
+        LOG.info(
+            'client id {0} has an unhandled exception '
+            'in greenlet {1}: {2}'.format(
+                self.client_id,
+                failed_greenlet.name,
+                str(failed_greenlet.exception)
+            )
+        )
+        self.shutdown()
+
     def __enter__(self):
         return self
 
     def __exit__(self, exception_type, exception_value, traceback):
         self.shutdown()
+
+
+class RepeatedTimeoutException(Exception):
+    def __init__(self, greenlet_name):
+        self.greenlet_name = greenlet_name
+        super(RepeatedTimeoutException, self).__init__(
+            'Too many timeouts'
+        )
 
 
 class UnexpectedConnectResponseException(Exception):
