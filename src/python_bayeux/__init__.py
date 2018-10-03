@@ -461,6 +461,7 @@ class BayeuxClient(object):
             # If we have been called by a callback (that is, the client wants
             # to shut down itself), then we don't want to wait for the execute
             # greenlet to stop, because we'll deadlock.
+            # This also means that subclasses should not change self.greenlets
             relevant_greenlets = \
                 self.greenlets[:-1] \
                 if gevent.getcurrent() == self.greenlets[-1] \
