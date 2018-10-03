@@ -152,6 +152,35 @@ def test_one_client(please_start_demo):
         assert client.value['data']['chat'] == code
 
 
+def test_one_client_go_then_block(please_start_demo):
+    # Using getpass() only because I know it handles the py.test tty redirect
+    # well
+    code = ''.join(random.choice(ascii_letters) for i in range(12))
+    getpass(
+        'Point a browser to \n'
+        'http://localhost:8080/jquery-examples/chat/\n'
+        'Enter a chat name, and click the Join button.\n'
+        'Watch for the chat prompt.  When prompted, '
+        'copy the following string into then chat'
+        ' : {0}\n'
+        'Hit enter when you are ready:'.format(
+            code
+        )
+    )
+    with ClientOne('http://localhost:8080/cometd') as client:
+        client.subscribe('/chat/demo', 'test_shutdown')
+        client.publish(
+            'Please enter the test code!',
+            'TestUser'
+        )
+        client.go()
+        try:
+            client.block()
+        except KeyboardInterrupt:
+            assert False
+        assert client.value['data']['chat'] == code
+
+
 def test_one_client_subscribe_timeouts(please_start_demo, monkeypatch):
     # Using getpass() only because I know it handles the py.test tty redirect
     # well

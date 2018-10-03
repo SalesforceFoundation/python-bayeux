@@ -71,6 +71,7 @@ class BayeuxClient(object):
         self.executing = False
         self.stop_greenlets = False
         self.waiting_for_resubscribe = False
+        self.go_called = False
 
         self.outbound_greenlets = []
         for method in (self._subscribe_greenlet,
@@ -423,6 +424,10 @@ class BayeuxClient(object):
     # This is how a client can be given its own execute greenlet, but not
     # block the main greenlet
     def go(self):
+        if self.go_called:
+            return
+
+        self.go_called = True
         block_greenlet = gevent.Greenlet(self.block)
         block_greenlet.link_exception(self._exception_callback)
         self.greenlets.append(block_greenlet)
@@ -437,7 +442,7 @@ class BayeuxClient(object):
             self._execute_greenlet()
         else:
             # If we have already given this client its own execute greenlet
-            # via go(), then this should do nothing but block
+            # via go(), then this should just block the main greenlet
             while True:
                 if all([not greenlet for greenlet in self.greenlets]):
                     break
@@ -453,8 +458,16 @@ class BayeuxClient(object):
 
             # disconnect() runs in the main greenlet, so we want to give the
             # others a chance to finish
+            # If we have been called by a callback (that is, the client wants
+            # to shut down itself), then we don't want to wait for the execute
+            # greenlet to stop, because we'll deadlock.
+            relevant_greenlets = \
+                self.greenlets[:-1] \
+                if gevent.getcurrent() == self.greenlets[-1] \
+                else self.greenlets
+
             gevent.joinall(
-                [greenlet for greenlet in self.greenlets if greenlet]
+                [greenlet for greenlet in relevant_greenlets if greenlet]
             )
             self.disconnect()
 
