@@ -1,6 +1,13 @@
 News
 ====
 
+0.1.6
+---
+
+*Release date: 2018-10-03*
+
+* Improved error handling
+
 0.1.5
 ---
 
