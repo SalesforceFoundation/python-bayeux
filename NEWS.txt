@@ -1,6 +1,13 @@
 News
 ====
 
+0.1.7
+---
+
+*Release date: 2018-10-07*
+
+* Raise exceptions in main greenlet
+
 0.1.6
 ---
 
