@@ -34,7 +34,7 @@ from pytest import raises
 from python_bayeux import BayeuxClient
 from python_bayeux import RepeatedTimeoutException
 from types import MethodType
-
+import logging
 import gevent
 import simplejson as json
 import random
@@ -133,7 +133,7 @@ def test_one_client(please_start_demo):
         'http://localhost:8080/jquery-examples/chat/\n'
         'Enter a chat name, and click the Join button.\n'
         'Watch for the chat prompt.  When prompted, '
-        'copy the following string into then chat'
+        'copy the following string into the chat'
         ' : {0}\n'
         'Hit enter when you are ready:'.format(
             code
@@ -161,7 +161,7 @@ def test_one_client_go_then_block(please_start_demo):
         'http://localhost:8080/jquery-examples/chat/\n'
         'Enter a chat name, and click the Join button.\n'
         'Watch for the chat prompt.  When prompted, '
-        'copy the following string into then chat'
+        'copy the following string into the chat'
         ' : {0}\n'
         'Hit enter when you are ready:'.format(
             code
@@ -181,15 +181,8 @@ def test_one_client_go_then_block(please_start_demo):
         assert client.value['data']['chat'] == code
 
 
-def test_one_client_subscribe_timeouts(please_start_demo, monkeypatch):
-    # Using getpass() only because I know it handles the py.test tty redirect
-    # well
-    getpass(
-        'Point a browser to \n'
-        'http://localhost:8080/jquery-examples/chat/\n'
-        'Enter a chat name, and click the Join button.\n'
-        'Hit enter when you are ready:'
-    )
+def test_one_client_subscribe_timeouts(caplog, please_start_demo, monkeypatch):
+    caplog.set_level(logging.INFO)
 
     def patched_send_message(self, payload, **kwargs):
         if 'channel' in payload and payload['channel'] == '/meta/subscribe':
@@ -206,29 +199,14 @@ def test_one_client_subscribe_timeouts(please_start_demo, monkeypatch):
             'No need to enter a test code.  Just wait...',
             'TestUser'
         )
-        try:
+        with raises(RepeatedTimeoutException) as exc_info:
             client.block()
-        except KeyboardInterrupt:
-            assert False
+        assert exc_info.value.greenlet_name == 'subscribe'
 
-        # This depends on the order that outbound_greenlets is populated
-        assert isinstance(
-            client.outbound_greenlets[0].exception,
-            RepeatedTimeoutException
-        )
         assert not hasattr(client, 'value')
 
 
 def test_one_client_unsubscribe_timeouts(please_start_demo, monkeypatch):
-    # Using getpass() only because I know it handles the py.test tty redirect
-    # well
-    getpass(
-        'Point a browser to \n'
-        'http://localhost:8080/jquery-examples/chat/\n'
-        'Enter a chat name, and click the Join button.\n'
-        'Hit enter when you are ready:'
-    )
-
     def patched_send_message(self, payload, **kwargs):
         if 'channel' in payload and payload['channel'] == '/meta/unsubscribe':
             raise requests.exceptions.ReadTimeout()
@@ -245,16 +223,10 @@ def test_one_client_unsubscribe_timeouts(please_start_demo, monkeypatch):
             'TestUser'
         )
         client.unsubscribe('/chat/demo')
-        try:
+        with raises(RepeatedTimeoutException) as exc_info:
             client.block()
-        except KeyboardInterrupt:
-            assert False
+        assert exc_info.value.greenlet_name == 'unsubscribe'
 
-        # This depends on the order that outbound_greenlets is populated
-        assert isinstance(
-            client.outbound_greenlets[1].exception,
-            RepeatedTimeoutException
-        )
         assert not hasattr(client, 'value')
 
 
@@ -267,7 +239,7 @@ def test_one_client_subscribe_timeouts_recover(please_start_demo, monkeypatch):
         'http://localhost:8080/jquery-examples/chat/\n'
         'Enter a chat name, and click the Join button.\n'
         'Watch for the chat prompt.  When prompted, '
-        'copy the following string into then chat'
+        'copy the following string into the chat'
         ' : {0}\n'
         'Hit enter when you are ready:'.format(
             code
@@ -313,7 +285,7 @@ def test_one_client_unsubscribe_timeouts_recover(please_start_demo,
         'http://localhost:8080/jquery-examples/chat/\n'
         'Enter a chat name, and click the Join button.\n'
         'Watch for the chat prompt.  When prompted, '
-        'copy the following string into then chat'
+        'copy the following string into the chat'
         ' : {0}\n'
         'Hit enter when you are ready:'.format(
             code
@@ -413,18 +385,9 @@ def test_broken_client(please_start_demo):
         )
 
         client.go()
-        try:
+        with raises(Exception) as e:
             client.block()
-        except KeyboardInterrupt:
-            assert False
-
-        # This depends on the order that client.greenlets is populated
-        assert isinstance(
-            client.greenlets[-1].exception,
-            Exception
-        )
-
-        assert str(client.greenlets[-1].exception) == 'ouch'
+            assert str(e) == 'ouch'
 
 
 def test_broken_client_same_greenlet(please_start_demo):
@@ -470,15 +433,14 @@ def test_broken_client_local_loop(please_start_demo):
 
         client.go()
         try:
-            while not client.disconnect_complete:
+            while client.exception is None:
                 gevent.sleep(0.5)
         except KeyboardInterrupt:
             assert False
 
-        # This depends on the order that client.greenlets is populated
         assert isinstance(
-            client.greenlets[-1].exception,
+            client.exception,
             Exception
         )
 
-        assert str(client.greenlets[-1].exception) == 'ouch'
+        assert str(client.exception) == 'ouch'

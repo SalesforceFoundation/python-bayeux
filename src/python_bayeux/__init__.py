@@ -51,6 +51,7 @@ class BayeuxClient(object):
         self.oauth_session = \
             requests.Session() if oauth_session is None else oauth_session
         self.shutdown_called = False
+        self.shutdown_completed = False
 
         # Inbound
         self.message_queue = gevent.queue.Queue()
@@ -72,6 +73,7 @@ class BayeuxClient(object):
         self.stop_greenlets = False
         self.waiting_for_resubscribe = False
         self.go_called = False
+        self.exception = None
 
         self.outbound_greenlets = []
         for method in (self._subscribe_greenlet,
@@ -436,17 +438,16 @@ class BayeuxClient(object):
         # True if we call block() later
         gevent.sleep(0.1)
 
-    # This is how the main greenlet can be made to block
     def block(self):
         if not self.executing:
             self._execute_greenlet()
         else:
-            # If we have already given this client its own execute greenlet
-            # via go(), then this should just block the main greenlet
-            while True:
-                if all([not greenlet for greenlet in self.greenlets]):
-                    break
+            # block the main greenlet
+            while self.exception is None and any(self.greenlets):
                 gevent.sleep(1)
+
+        if self.exception is not None:
+            raise self.exception
 
     def shutdown(self):
         if not self.shutdown_called:
@@ -467,10 +468,9 @@ class BayeuxClient(object):
                 if gevent.getcurrent() == self.greenlets[-1] \
                 else self.greenlets
 
-            gevent.joinall(
-                [greenlet for greenlet in relevant_greenlets if greenlet]
-            )
+            gevent.joinall(relevant_greenlets)
             self.disconnect()
+            self.shutdown_completed = True
 
     def _exception_callback(self, failed_greenlet):
         LOG.info(
@@ -481,13 +481,24 @@ class BayeuxClient(object):
                 str(failed_greenlet.exception)
             )
         )
-        self.shutdown()
+
+        self.exception = failed_greenlet.exception
+
+        try:
+            self.shutdown()
+        except Exception:
+            # We prefer to shut down, but if something doesn't work (like the
+            # org is sending back a total requests limit error), then don't
+            # worry
+            pass
 
     def __enter__(self):
         return self
 
     def __exit__(self, exception_type, exception_value, traceback):
         self.shutdown()
+        while not self.shutdown_completed:
+            gevent.sleep(0.5)
 
 
 class RepeatedTimeoutException(Exception):
