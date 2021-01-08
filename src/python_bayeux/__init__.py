@@ -28,9 +28,6 @@
     POSSIBILITY OF SUCH DAMAGE.
 '''
 
-import gevent.monkey
-gevent.monkey.patch_all()
-
 import simplejson as json
 import gevent
 import gevent.queue
