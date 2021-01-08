@@ -6,7 +6,7 @@ README = open(os.path.join(here, 'README.rst')).read()
 NEWS = open(os.path.join(here, 'NEWS.txt')).read()
 
 
-version = '0.1.7'
+version = '1.0.0'
 
 install_requires = [
     # List your project dependencies here.
@@ -29,7 +29,7 @@ setup(name='python-bayeux',
     author='Adam J. Lincoln',
     author_email='alincoln@salesforce.com',
     url='https://github.com/SalesforceFoundation/python-bayeux',
-    download_url='https://github.com/SalesforceFoundation/python-bayeux/tarball/0.1.7',
+    download_url='https://github.com/SalesforceFoundation/python-bayeux/tarball/1.0.0',
     license='BSD 3-Clause',
     packages=find_packages('src'),
     package_dir = {'': 'src'},include_package_data=True,

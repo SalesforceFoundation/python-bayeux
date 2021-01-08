@@ -28,6 +28,9 @@
     POSSIBILITY OF SUCH DAMAGE.
 '''
 
+from gevent import monkey
+monkey.patch_all()
+
 from getpass import getpass
 from pytest import fixture
 from pytest import raises
