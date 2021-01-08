@@ -28,14 +28,8 @@ View test coverage results at ``./coverage``.
 Credits
 -------
 
-- `modern-package-template`_
-- `requests`_
-- `gevent`_
-- `py.test`_
-- `pytest-cov`_
-
-.. _`modern-package-template`: http://pypi.python.org/pypi/modern-package-template
-.. _`requests`: https://pypi.python.org/pypi/requests
-.. _`gevent`: http://www.gevent.org/
-.. _`py.test`: http://doc.pytest.org/en/latest/index.html
-.. _`pytest-cov`: https://pypi.python.org/pypi/pytest-cov
+- [modern-package-template](http://pypi.python.org/pypi/modern-package-template)
+- [requests](https://pypi.python.org/pypi/requests)
+- [gevent](http://www.gevent.org/)
+- [py.test](http://doc.pytest.org/en/latest/index.html)
+- [pytest-cov](https://pypi.python.org/pypi/pytest-cov)
