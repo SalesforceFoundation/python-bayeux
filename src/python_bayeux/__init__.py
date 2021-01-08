@@ -65,6 +65,7 @@ class BayeuxClient(object):
         # handshake() has a side effect of initializing self.message_counter
         self.handshake()
 
+        self.connect_timeout = None
         self.disconnect_complete = False
         self.executing = False
         self.stop_greenlets = False
@@ -115,8 +116,9 @@ class BayeuxClient(object):
         # TODO: handle other 'reconnect' values
         if initial_connect_response_payload['successful']:
             # Convert to seconds
-            self.connect_timeout = \
-                initial_connect_response_payload['advice']['timeout'] / 1000.0
+            if 'advice' in initial_connect_response_payload:
+                advice = initial_connect_response_payload['advice']
+                self.connect_timeout = advice['timeout'] / 1000.0
         # TODO: if not successful, then what?
 
     def disconnect(self):

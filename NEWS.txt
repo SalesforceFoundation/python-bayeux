@@ -1,6 +1,25 @@
 News
 ====
 
+1.0.0
+---
+
+*Release date: 2021-01-08*
+
+* Breaking change: No more official support for python 2: **If you need to run on python 2, stay on the 0.1.x series.**
+* Breaking change: This library no longer calls gevent's monkey patch internally.  Code using this library must do
+
+```
+from gevent import monkey
+monkey.patch_all()
+```
+
+or some other choice of patch_* functions to prepare gevent before importing this library.  See
+
+https://github.com/gevent/gevent/issues/1231#issuecomment-393945383
+
+for some context.
+
 0.1.7
 ---
 
